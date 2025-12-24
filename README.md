@@ -107,6 +107,13 @@ npm run build  # production bundle
 
 The development server listens on `http://localhost:5173` by default and proxies API calls to `http://localhost:8080`.
 
+Set `VITE_BACKEND_URL` in `frontend/.env.local` (or export it when launching Vite) if your local FastAPI backend runs on a different origin. Example:
+
+```bash
+echo "VITE_BACKEND_URL=http://localhost:9090" > frontend/.env.local
+npm run dev
+```
+
 > For production or local “all-in-one” testing, run `npm run build` once. The FastAPI app will automatically serve the generated `frontend/dist` directory thanks to the default `FRONTEND_DIST_PATH`, so visiting the backend origin (e.g., `http://localhost:8080`) will render the SPA while `/api/...` continues returning JSON.
 
 ## Production Deployment
@@ -139,6 +146,8 @@ The development server listens on `http://localhost:5173` by default and proxies
 5. **MongoDB & environment**
    - Point `MONGO_URI` at your managed cluster and ensure the production host can reach it securely.
    - Store `.env` files outside of version control and rotate provider keys regularly.
+   
+Port or domain changes only require updating the backend `.env` (`SERVER_PORT`, reverse proxy host, etc.). The SPA reads `window.location.origin`, so any user visiting the deployed FastAPI host automatically talks to the correct `/api`. Only when hosting the frontend on a different domain do you need to override `window.ENV.API_URL` (edit `frontend/public/config.js` before building or serve your own `config.js`).
 
 ## API Overview
 

@@ -105,6 +105,13 @@ npm run build  # 生成生产构建
 
 默认情况下，前端监听 `http://localhost:5173`，并通过代理转发接口到 `http://localhost:8080`。
 
+如需在本地使用其他后端地址，可在 `frontend/.env.local` 中设置 `VITE_BACKEND_URL`（或在启动命令前导出变量）：
+
+```bash
+echo "VITE_BACKEND_URL=http://localhost:9090" > frontend/.env.local
+npm run dev
+```
+
 > 若希望后端一站式提供 UI，请在开发或部署前运行一次 `npm run build`。FastAPI 会根据默认 `FRONTEND_DIST_PATH` 自动挂载 `frontend/dist`，访问 `http://localhost:8080` 即可加载 SPA，同时 `/api/...` 仍返回 JSON。
 
 ## 生产部署
@@ -137,6 +144,8 @@ npm run build  # 生成生产构建
 5. **MongoDB 与环境变量**
    - `MONGO_URI` 指向云端数据库时，确保网络与权限安全。
    - `.env` 只应保存在服务器上，勿提交仓库，定期轮换 API Key。
+
+部署后若需调整端口或域名，只需修改后端 `.env`（如 `SERVER_PORT`）或反向代理配置；前端会根据 `window.location.origin` 自动请求当前站点的 `/api`。只有在前端与后端分域托管时，才需要在构建前修改 `frontend/public/config.js`（或自定义 `config.js`）以覆盖 `window.ENV.API_URL`。
 
 ## API 概览
 

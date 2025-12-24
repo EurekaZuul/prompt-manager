@@ -10,7 +10,8 @@ declare global {
   }
 }
 
-const API_BASE_URL = (window.ENV?.API_URL || 'http://localhost:8080') + '/api';
+const apiOrigin = (window.ENV?.API_URL || window.location.origin || '').replace(/\/$/, '');
+const API_BASE_URL = `${apiOrigin || ''}/api`;
 
 export interface LLMRequestOptions {
   providerId?: string;

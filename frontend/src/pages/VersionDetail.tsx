@@ -178,6 +178,16 @@ export const VersionDetail: React.FC = () => {
     }
   };
 
+  const projectId = prompt?.project_id || prompt?.project?.id;
+
+  const handleBackNavigation = () => {
+    if (projectId) {
+      navigate(`/project/${projectId}`);
+    } else {
+      navigate('/');
+    }
+  };
+
   const handleCopyContent = async () => {
     if (prompt?.content) {
       try {
@@ -294,7 +304,7 @@ export const VersionDetail: React.FC = () => {
         <div className="text-center">
           <p className="text-gray-600">未找到版本信息</p>
           <button
-            onClick={() => navigate(-1)}
+            onClick={handleBackNavigation}
             className="mt-4 text-indigo-600 hover:text-indigo-800 transition-colors"
           >
             返回上一页
@@ -310,7 +320,7 @@ export const VersionDetail: React.FC = () => {
       <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white pb-24">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <button
-            onClick={() => navigate(-1)}
+            onClick={handleBackNavigation}
             className="flex items-center text-slate-300 hover:text-white transition-colors mb-6 group"
           >
             <ArrowLeft className="w-5 h-5 mr-2 transform group-hover:-translate-x-1 transition-transform" />

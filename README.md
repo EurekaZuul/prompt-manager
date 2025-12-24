@@ -2,7 +2,8 @@
 
 [中文文档](./README_zh.md) | **English**
 
-Prompt Manager is a full-stack application designed to help developers and prompt engineers manage, version, and organize their LLM prompts efficiently. It provides a centralized interface for creating projects, managing prompt versions, comparing changes, and organizing prompts with tags and categories.
+Prompt Manager is a full‑stack prompt operations platform. It helps developers and prompt engineers version, diff, test, and optimize LLM prompts with a friendly UI plus an async FastAPI backend. Projects group prompts, every edit becomes a new version with rollback, and streaming SSE integrations allow rapid iterations with providers such as Aliyun Bailian.
+
 ![alt text](image.png)
 ![alt text](image-1.png)
 ![alt text](image-2.png)
@@ -10,121 +11,118 @@ Prompt Manager is a full-stack application designed to help developers and promp
 
 ## Features
 
-- **Project Management**: Organize your prompts into distinct projects.
-- **Prompt Versioning**: automatically track changes to your prompts with version control.
-- **Diff Viewer**: Visually compare different versions of a prompt to see what changed.
-- **AI Optimization**: Built-in AI optimization feature, integrating with Aliyun Bailian or OpenAI-compatible large models to provide prompt optimization suggestions.
-- **Prompt Testing**: Built-in playground to test prompts with custom user messages, drag-and-drop reordering, and real-time streaming responses.
-- **Streaming Response**: Optimization results use streaming output (Server-Sent Events), supporting real-time preview and typewriter effect.
-- **Visual Editing**: Optimized prompts support secondary editing, previewing, and one-click copy/apply in a modal window.
-- **Rollback Capability**: Easily revert to previous versions of a prompt.
-- **Organization**: Use Tags and Categories to filter and manage prompts effectively.
-- **Import/Export**: Support for importing and exporting data in JSON format for backup or migration.
-- **Integration Support**: Built-in tutorial and API documentation for integrating managed prompts into your applications.
+- **Project workspace** – organize related prompts under one project with descriptions and metadata.
+- **Automatic versioning** – each save creates a new prompt version, complete with timestamps and semantic diffing.
+- **Diff & history** – compare versions visually, inspect change statistics, and rollback when needed.
+- **Prompt testing playground** – send ad‑hoc user inputs, reorder turns, and consume streamed responses.
+- **AI optimization** – run provider-backed prompt optimization with streaming previews and secondary editing.
+- **Tag & category management** – classify prompts for fast filtering; includes dedicated admin pages.
+- **Import / export** – backup or migrate your prompts via JSON/YAML.
+- **Integration helpers** – copy-ready snippets and tutorials make embedding prompts in downstream systems simple.
 
 ## Tech Stack
 
 ### Backend
-- **Language**: Go (Golang)
-- **Framework**: Gin Web Framework
-- **Database**: MySQL (default), SQLite  supports GORM compatible databases
-- **ORM**: GORM
+
+- **Runtime**: Python 3.10+
+- **Framework**: FastAPI with Uvicorn
+- **Database**: MongoDB via the async Motor driver
+- **Utilities**: Pydantic v2 for schemas, SSE-Starlette for streaming, diff-match-patch for version diffs
 
 ### Frontend
-- **Framework**: React
+
+- **Framework**: React + TypeScript
 - **Build Tool**: Vite
 - **Styling**: Tailwind CSS
 - **State Management**: Zustand
-- **Routing**: React Router
-- **Icons**: Lucide React
+- **Routing & Icons**: React Router, Lucide React
 
-## Project Structure
+## Repository Layout
 
 ```
 prompt-manager/
-├── backend/            # Go backend application
-│   ├── config/         # Configuration loading
-│   ├── database/       # Database initialization
-│   ├── handlers/       # HTTP request handlers
-│   ├── middleware/     # HTTP middleware
-│   ├── models/         # Data models
-│   ├── services/       # Business logic
-│   └── main.go         # Entry point
-├── frontend/           # React frontend application
-│   ├── public/         # Static assets
-│   └── src/            # Source code
-│       ├── components/ # Reusable UI components
-│       ├── pages/      # Application pages
-│       ├── services/   # API client
-│       └── types/      # TypeScript type definitions
-└── README.md           # Project documentation
+├── AGENTS.md                # Contributor guidelines for Codex/agents
+├── README.md / README_zh.md # Documentation (English / Chinese)
+├── backend_fastapi/
+│   ├── pyproject.toml       # FastAPI backend dependencies
+│   └── src/app/             # FastAPI application (config, routers, services, models)
+├── frontend/                # Vite + React client
+│   ├── public/              # Static assets
+│   └── src/                 # Components, pages, services, Zustand stores
+└── image*.png               # Screenshots used in the docs
 ```
 
-## Getting Started
+## Prerequisites
 
-### Prerequisites
+- Python **3.10+**
+- MongoDB **6.x+** (local or remote instance)
+- Node.js **18+** and npm
 
-- **Go**: Version 1.18 or higher
-- **Node.js**: Version 16 or higher
-- **npm** or **yarn**
-
-### Installation & Running
-
-#### 1. Backend Setup
-
-Navigate to the backend directory and install dependencies:
+## Backend Setup (`backend_fastapi`)
 
 ```bash
-cd backend
-go mod download
+cd backend_fastapi
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .[dev]
 ```
 
-Create a `.env` file in the `backend` directory (optional, uses defaults if omitted):
+Create a `.env` file (values below mirror the defaults):
 
 ```env
+SERVER_HOST=0.0.0.0
 SERVER_PORT=8080
-DB_TYPE=sqlite
-DB_NAME=prompt_manager.db
+MONGO_URI=mongodb://localhost:27017
+MONGO_DB=prompt_manager
+ALIYUN_API_KEY=
+ALIYUN_API_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+ALIYUN_MODEL=qwen-turbo
+ALIYUN_SYSTEM_PROMPT=
 ```
 
-Start the backend server:
+Run the API locally:
 
 ```bash
-go run main.go
+uvicorn app.main:app --host 0.0.0.0 --port 8080 --app-dir src
 ```
 
-The backend server will start on `http://localhost:8080`.
+Execute backend tests:
 
-#### 2. Frontend Setup
+```bash
+pytest
+```
 
-Navigate to the frontend directory and install dependencies:
+## Frontend Setup (`frontend`)
 
 ```bash
 cd frontend
 npm install
+npm run dev    # start Vite dev server with proxy to FastAPI
+npm run lint   # ESLint + React hooks rules
+npm run check  # TypeScript project references
+npm run build  # production bundle
 ```
 
-Start the development server:
-
-```bash
-npm run dev
-```
-
-The frontend application will typically start on `http://localhost:5173`.
+The development server listens on `http://localhost:5173` by default and proxies API calls to `http://localhost:8080`.
 
 ## API Overview
 
-The backend exposes a RESTful API at `http://localhost:8080/api`. Key endpoints include:
+The FastAPI service exposes REST + SSE endpoints under `/api`:
 
-- `GET /api/projects`: List all projects
-- `POST /api/projects`: Create a new project
-- `GET /api/projects/:id/prompts`: Get prompts for a specific project
-- `POST /api/projects/:id/prompts`: Create a new prompt
-- `GET /api/prompts/:id`: Get prompt details
-- `PUT /api/prompts/:id`: Update a prompt (creates a new version)
-- `GET /api/prompts/:id/diff/:target_id`: Compare two prompt versions
-- `POST /api/optimize-prompt`: Call LLM for prompt optimization (supports streaming)
-- `POST /api/test-prompt`: Test prompt with conversation history (supports streaming)
-- `GET /api/settings`: Get system configuration
-- `POST /api/settings`: Update system configuration
+- `GET /api/projects` / `POST /api/projects` – list or create projects.
+- `GET /api/projects/{project_id}/prompts` – fetch prompt versions in a project (filtered by name/category).
+- `POST /api/projects/{project_id}/prompts` – create a prompt or bump a new version.
+- `GET /api/prompts/{prompt_id}` – fetch a version; `PUT` updates content/metadata (and versions when needed).
+- `GET /api/prompts/{prompt_id}/diff/{target_prompt_id}` – HTML diff payload.
+- `POST /api/prompts/{prompt_id}:optimize` – SSE stream for optimization suggestions.
+- `POST /api/prompts/{prompt_id}:test` – SSE playground for conversation testing.
+- `GET/POST /api/settings` – read or update provider configuration.
+- `GET /api/tags`, `GET /api/categories`, `GET /api/export` – supporting resources for organization and backups.
 
+Refer to the FastAPI docs at `http://localhost:8080/docs` when the server is running for the complete contract.
+
+## Development Tips
+
+- Keep `.env` files in `backend_fastapi/` and `frontend/` (never commit keys).
+- SSE payloads follow `{ text: string }`; reuse helper utilities when adding new streams.
+- When integrating additional providers, add configuration keys to `backend_fastapi/.env` and surface them through the settings router so the UI stays in sync.

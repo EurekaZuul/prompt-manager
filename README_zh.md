@@ -1,8 +1,9 @@
-# Prompt Manager (提示词管理器)
+# Prompt Manager（提示词管理器）
 
 [English](./README.md) | **中文文档**
 
-Prompt Manager 是一个全栈应用程序，旨在帮助开发者和提示词工程师高效地管理、版本化和组织 LLM（大型语言模型）提示词。它提供了一个集中式的界面，用于创建项目、管理提示词版本、对比变更，并通过标签和分类来组织提示词。
+Prompt Manager 是一个围绕提示词研发流程打造的全栈平台：后端使用 FastAPI + MongoDB 提供异步 API，前端使用 React + TypeScript 构建交互界面。项目支持提示词项目管理、版本追踪、差异对比、AI 智能优化以及实时流式测试，帮助团队安全地沉淀和复用优质 Prompt。
+
 ![alt text](image.png)
 ![alt text](image-1.png)
 ![alt text](image-2.png)
@@ -10,128 +11,115 @@ Prompt Manager 是一个全栈应用程序，旨在帮助开发者和提示词�
 
 ## 功能特性
 
-- **项目管理**：将您的提示词组织到不同的项目中。
-- **提示词版本控制**：自动追踪提示词的变更，实现版本控制。
-- **差异对比 (Diff Viewer)**：可视化对比不同版本的提示词，清晰查看变更内容。
-- **AI 智能优化**：内置 AI 优化功能，对接阿里云百炼或兼容 OpenAI 协议的大模型，提供提示词优化建议。
-- **提示词测试 (Playground)**：内置测试环境，支持自定义对话消息、拖拽排序和实时流式响应，方便验证提示词效果。
-- **流式实时响应**：优化结果采用流式输出（Server-Sent Events），支持实时预览和打字机效果。
-- **可视化编辑**：优化后的提示词支持在弹窗中进行二次编辑、预览和一键复制/应用。
-- **回滚能力**：轻松将提示词恢复到之前的版本。
-- **组织整理**：使用标签 (Tags) 和分类 (Categories) 有效地筛选和管理提示词。
-- **导入/导出**：支持 JSON 格式的数据导入和导出，便于备份或迁移。
-- **集成支持**：内置教程和 API 文档，方便将托管的提示词集成到您的应用程序中。
-
+- **项目空间**：将提示词划分到不同项目，并维护描述与元信息。
+- **自动版本控制**：每次保存都会生成新版本，保留时间戳与内容快照。
+- **可视化 Diff**：直观对比不同版本的差异，支持回滚。
+- **提示词测试台**：内置 Playground，支持自定义消息、拖拽排序与 SSE 流式响应。
+- **AI 智能优化**：调用阿里云百炼或兼容 OpenAI 的模型生成优化建议，可在弹窗中二次编辑。
+- **标签 / 分类管理**：专用后台页维护标签与分类，便于筛选。
+- **导入导出**：支持 JSON / YAML 备份和迁移。
+- **集成教程**：提供示例与 API 文档，帮助快速接入业务系统。
 
 ## 技术栈
 
-### 后端 (Backend)
-- **语言**: Go (Golang)
-- **框架**: Gin Web Framework
-- **数据库**: Mysql(默认),、SQLite  支持兼容 GORM 的数据库
-- **ORM**: GORM
+### 后端
+- **语言 / 运行时**：Python 3.10+
+- **框架**：FastAPI + Uvicorn
+- **数据库**：MongoDB（Motor 异步驱动）
+- **核心库**：Pydantic v2、SSE-Starlette、diff-match-patch
 
-### 前端 (Frontend)
-- **框架**: React
-- **构建工具**: Vite
-- **样式**: Tailwind CSS
-- **状态管理**: Zustand
-- **路由**: React Router
-- **图标**: Lucide React
+### 前端
+- **框架**：React + TypeScript
+- **构建工具**：Vite
+- **样式**：Tailwind CSS
+- **状态管理**：Zustand
+- **路由与图标**：React Router、Lucide React
 
 ## 项目结构
 
 ```
 prompt-manager/
-├── backend/            # Go 后端应用
-│   ├── config/         # 配置加载
-│   ├── database/       # 数据库初始化
-│   ├── handlers/       # HTTP 请求处理
-│   ├── middleware/     # HTTP 中间件
-│   ├── models/         # 数据模型
-│   ├── services/       # 业务逻辑
-│   └── main.go         # 入口文件
-├── frontend/           # React 前端应用
-│   ├── public/         # 静态资源
-│   └── src/            # 源代码
-│       ├── components/ # 可复用 UI 组件
-│       ├── pages/      # 应用页面
-│       ├── services/   # API 客户端
-│       └── types/      # TypeScript 类型定义
-└── README.md           # 项目文档
+├── AGENTS.md                # 贡献者指南 / 开发协议
+├── README.md / README_zh.md # 文档（英文 / 中文）
+├── backend_fastapi/         # FastAPI 后端
+│   ├── pyproject.toml       # 依赖声明
+│   └── src/app/             # 配置、Router、Service、Model、Schema
+├── frontend/                # Vite + React 前端
+│   ├── public/              # 静态资源
+│   └── src/                 # 组件、页面、服务、Zustand Store
+└── image*.png               # 文档截图
 ```
 
-## 快速开始
+## 环境要求
 
-### 前置要求
+- Python **3.10+**
+- MongoDB **6.x+**（本地或远程实例）
+- Node.js **18+** 与 npm
 
-- **Go**: 版本 1.18 或更高
-- **Node.js**: 版本 16 或更高
-- **npm** 或 **yarn**
-
-### 安装与运行
-
-#### 1. 后端设置
-
-进入 backend 目录并安装依赖：
+## 后端启动 (`backend_fastapi`)
 
 ```bash
-cd backend
-go mod download
+cd backend_fastapi
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .[dev]
 ```
 
-在 `backend` 目录下创建一个 `.env` 文件（可选，如果省略则使用默认值）：
+在 `backend_fastapi/.env` 中配置环境变量（如下为默认值）：
 
 ```env
+SERVER_HOST=0.0.0.0
 SERVER_PORT=8080
-DB_TYPE=sqlite
-DB_NAME=prompt_manager.db
+MONGO_URI=mongodb://localhost:27017
+MONGO_DB=prompt_manager
+ALIYUN_API_KEY=
+ALIYUN_API_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+ALIYUN_MODEL=qwen-turbo
+ALIYUN_SYSTEM_PROMPT=
 ```
 
-启动后端服务器：
+启动 FastAPI 服务：
 
 ```bash
-go run main.go
+uvicorn app.main:app --host 0.0.0.0 --port 8080 --app-dir src
 ```
 
-后端服务器将在 `http://localhost:8080` 启动。
+运行后端测试：
 
-#### 2. 前端设置
+```bash
+pytest
+```
 
-进入 frontend 目录并安装依赖：
+## 前端启动 (`frontend`)
 
 ```bash
 cd frontend
 npm install
+npm run dev    # 启动 Vite 开发服务器（含 API 代理）
+npm run lint   # ESLint + React hooks 检查
+npm run check  # TypeScript project references
+npm run build  # 生成生产构建
 ```
 
-启动开发服务器：
-
-```bash
-npm run dev
-```
-
-前端应用通常会在 `http://localhost:5173` 启动。
+默认情况下，前端监听 `http://localhost:5173`，并通过代理转发接口到 `http://localhost:8080`。
 
 ## API 概览
 
-后端在 `http://localhost:8080/api` 提供 RESTful API。主要端点包括：
+FastAPI 服务在 `/api` 下提供 REST + SSE 接口：
 
-- `GET /api/projects`: 获取所有项目列表
-- `POST /api/projects`: 创建新项目
-- `GET /api/projects/:id/prompts`: 获取指定项目的提示词
-- `POST /api/projects/:id/prompts`: 创建新提示词
-- `GET /api/prompts/:id`: 获取提示词详情
-- `PUT /api/prompts/:id`: 更新提示词（创建新版本）
-- `GET /api/prompts/:id/diff/:target_id`: 对比两个提示词版本
-- `POST /api/optimize-prompt`: 调用大模型进行提示词优化（支持流式）
-- `POST /api/test-prompt`: 测试提示词对话（支持流式）
-- `GET /api/settings`: 获取系统配置
-- `POST /api/settings`: 更新系统配置
+- `GET /api/projects` / `POST /api/projects`：项目列表与创建。
+- `GET /api/projects/{project_id}/prompts` / `POST ...`：查询或新增某项目内的提示词版本。
+- `GET /api/prompts/{prompt_id}` / `PUT ...`：获取或更新单个版本（支持创建新版本）。
+- `GET /api/prompts/{prompt_id}/diff/{target_id}`：返回 HTML Diff 结果。
+- `POST /api/prompts/{prompt_id}:optimize`：触发优化并以 SSE 流返回。
+- `POST /api/prompts/{prompt_id}:test`：Playground 测试会话（SSE）。
+- `GET/POST /api/settings`：系统配置（模型、API Key）。
+- `GET /api/tags`、`GET /api/categories`、`GET /api/export`：标签、分类及导出能力。
 
+启动后可访问 `http://localhost:8080/docs` 获取完整 OpenAPI 文档。
 
-```shell
-cd backend_fastapi
-pip install -e .
-uvicorn app.main:app --host 0.0.0.0 --port 8080 --app-dir src
-```
+## 开发小贴士
+
+- `.env` 文件应位于 `backend_fastapi/` 与 `frontend/` 内，切勿提交到仓库。
+- SSE 响应统一为 `{ text: string }`，新增流时可复用现有工具函数。
+- 如果扩展新的模型供应商，请在后端 `Settings` 中定义环境变量，并通过 `/api/settings` 暴露到前端。

@@ -78,6 +78,8 @@ ALIYUN_API_KEY=
 ALIYUN_API_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 ALIYUN_MODEL=qwen-turbo
 ALIYUN_SYSTEM_PROMPT=
+CORS_ALLOW_ORIGINS=*
+# FRONTEND_DIST_PATH=/opt/frontend-dist  # optional override; defaults to ../frontend/dist
 ```
 
 Run the API locally:
@@ -104,6 +106,39 @@ npm run build  # production bundle
 ```
 
 The development server listens on `http://localhost:5173` by default and proxies API calls to `http://localhost:8080`.
+
+> For production or local “all-in-one” testing, run `npm run build` once. The FastAPI app will automatically serve the generated `frontend/dist` directory thanks to the default `FRONTEND_DIST_PATH`, so visiting the backend origin (e.g., `http://localhost:8080`) will render the SPA while `/api/...` continues returning JSON.
+
+## Production Deployment
+
+1. **Build the frontend bundle**
+   ```bash
+   cd frontend
+   npm install
+   npm run build
+   ```
+   By default the build artifacts live in `frontend/dist`. Copy this directory onto the production server (for example `/opt/prompt-manager/frontend-dist`).
+
+2. **Let FastAPI host the bundle (default)**
+   - The backend automatically looks for `frontend/dist` relative to the repo. Once that directory exists, it is mounted at `/`, while `/api` keeps handling JSON/SSE.
+   - If you store the built assets elsewhere, override `FRONTEND_DIST_PATH` with the absolute path.
+   - Prefer a CDN or standalone static host? Leave `FRONTEND_DIST_PATH` empty and point your reverse proxy to the external bundle while proxying `/api` to FastAPI.
+
+3. **Configure CORS**
+   - `CORS_ALLOW_ORIGINS` accepts a comma-separated list. Example: `CORS_ALLOW_ORIGINS=https://prompt.example.com,https://ops.example.com`.
+   - When the frontend is co-hosted (Option A), the default `*` is safe to replace with the site origin for stricter policies.
+
+4. **Run FastAPI behind a process manager**
+   ```bash
+   cd backend_fastapi
+   source .venv/bin/activate
+   uvicorn app.main:app --host 0.0.0.0 --port 8080 --app-dir src --workers 4
+   ```
+   Wrap this command with `systemd`, Supervisor, or Docker. Place Nginx or another reverse proxy in front to terminate TLS and forward traffic to `http://127.0.0.1:8080`.
+
+5. **MongoDB & environment**
+   - Point `MONGO_URI` at your managed cluster and ensure the production host can reach it securely.
+   - Store `.env` files outside of version control and rotate provider keys regularly.
 
 ## API Overview
 

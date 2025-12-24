@@ -76,6 +76,8 @@ ALIYUN_API_KEY=
 ALIYUN_API_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 ALIYUN_MODEL=qwen-turbo
 ALIYUN_SYSTEM_PROMPT=
+CORS_ALLOW_ORIGINS=*
+# FRONTEND_DIST_PATH=/opt/frontend-dist  # 可选覆盖，默认指向 ../frontend/dist
 ```
 
 启动 FastAPI 服务：
@@ -102,6 +104,39 @@ npm run build  # 生成生产构建
 ```
 
 默认情况下，前端监听 `http://localhost:5173`，并通过代理转发接口到 `http://localhost:8080`。
+
+> 若希望后端一站式提供 UI，请在开发或部署前运行一次 `npm run build`。FastAPI 会根据默认 `FRONTEND_DIST_PATH` 自动挂载 `frontend/dist`，访问 `http://localhost:8080` 即可加载 SPA，同时 `/api/...` 仍返回 JSON。
+
+## 生产部署
+
+1. **构建前端静态资源**
+   ```bash
+   cd frontend
+   npm install
+   npm run build
+   ```
+   构建结果位于 `frontend/dist`，将其上传到生产服务器（如 `/opt/prompt-manager/frontend-dist`）。
+
+2. **默认由 FastAPI 托管静态资源**
+   - 在项目结构未变的情况下，只要存在 `frontend/dist`，后端就会自动将其挂载到 `/`，`/api` 仍用于 JSON/SSE。
+   - 如果构建产物存放在其他目录，可通过 `FRONTEND_DIST_PATH` 指向新的绝对路径。
+   - 若希望交由 CDN / 独立站点托管前端，只需把 `FRONTEND_DIST_PATH` 设为空（或删除该变量），由前端站点请求后端 `/api`。
+
+3. **配置 CORS**
+   - `CORS_ALLOW_ORIGINS` 支持逗号分隔的多个域名，例如：`CORS_ALLOW_ORIGINS=https://prompt.example.com,https://ops.example.com`。
+   - 若前端与后端同域部署（方式 A），建议把 `*` 替换为实际域名以提升安全性。
+
+4. **以服务方式运行 FastAPI**
+   ```bash
+   cd backend_fastapi
+   source .venv/bin/activate
+   uvicorn app.main:app --host 0.0.0.0 --port 8080 --app-dir src --workers 4
+   ```
+   在生产中可使用 `systemd`、Supervisor 或 Docker 来管理进程，并通过 Nginx/Caddy 终止 TLS，再把请求转发到 `http://127.0.0.1:8080`。
+
+5. **MongoDB 与环境变量**
+   - `MONGO_URI` 指向云端数据库时，确保网络与权限安全。
+   - `.env` 只应保存在服务器上，勿提交仓库，定期轮换 API Key。
 
 ## API 概览
 

@@ -1,5 +1,8 @@
+from pathlib import Path
+
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.db import close_client, get_client
@@ -14,7 +17,7 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=cfg.cors_allow_origins or ["*"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -30,6 +33,12 @@ def create_app() -> FastAPI:
 
     app.include_router(api_router)
     app.include_router(health.router)
+
+    static_dir = cfg.frontend_dist_path
+    if static_dir:
+        static_path = Path(static_dir).resolve()
+        if static_path.exists() and static_path.is_dir():
+            app.mount("/", StaticFiles(directory=str(static_path), html=True), name="frontend")
 
     @app.on_event("startup")
     async def startup_event() -> None:  # pragma: no cover - wiring

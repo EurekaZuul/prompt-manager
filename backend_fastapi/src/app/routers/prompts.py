@@ -11,9 +11,8 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.dependencies import get_db
 from app.schemas.models import DiffResult, Prompt
-from app.services import aliyun_service
+from app.services import aliyun_service, provider_service
 from app.services.diff_service import DiffService
-from app.services.settings_store import get_settings_map
 from app.services.version_service import VersionService
 from app.utils import generate_id
 
@@ -42,6 +41,7 @@ class PromptUpdateRequest(BaseModel):
 class TestPromptRequest(BaseModel):
     messages: List[Dict[str, str]]
     stream: bool = False
+    provider_id: Optional[str] = None
     model: Optional[str] = None
     temperature: Optional[float] = None
     top_p: Optional[float] = None
@@ -295,16 +295,13 @@ async def get_sdk_prompt(
 
 @router.post("/test-prompt")
 async def test_prompt(payload: TestPromptRequest, db: AsyncIOMotorDatabase = Depends(get_db)):
-    settings_map = await get_settings_map(db)
-    api_key = settings_map.get("aliyun_api_key")
-    api_url = settings_map.get("aliyun_api_url")
-    default_model = settings_map.get("aliyun_model") or "qwen-turbo"
-
-    if not api_key:
-        raise HTTPException(status_code=400, detail="Aliyun API Key not configured")
+    try:
+        provider = await provider_service.resolve_provider(db, payload.provider_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     options = aliyun_service.ChatOptions(
-        model=payload.model or default_model,
+        model=payload.model or provider.model,
         temperature=payload.temperature,
         top_p=payload.top_p,
         max_tokens=payload.max_tokens,
@@ -313,14 +310,14 @@ async def test_prompt(payload: TestPromptRequest, db: AsyncIOMotorDatabase = Dep
     if payload.stream:
         async def event_generator():
             try:
-                async for chunk in aliyun_service.call_aliyun_chat_stream(api_key, api_url, options, payload.messages):
+                async for chunk in aliyun_service.call_aliyun_chat_stream(provider.api_key, provider.api_url, options, payload.messages):
                     yield {"event": "message", "data": json.dumps({"text": chunk})}
             except Exception as exc:  # pragma: no cover - streaming path
                 yield {"event": "error", "data": str(exc)}
 
         return EventSourceResponse(event_generator())
 
-    response = await aliyun_service.call_aliyun_chat(api_key, api_url, options, payload.messages)
+    response = await aliyun_service.call_aliyun_chat(provider.api_key, provider.api_url, options, payload.messages)
     return {"response": response}
 
 

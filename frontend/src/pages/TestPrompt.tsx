@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { ArrowLeft, Trash2, Play, GripVertical, StopCircle, Calculator, Copy, Settings, X, Check } from 'lucide-react';
 import { apiService } from '../services/api';
+import { LLMProvider } from '../types/models';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
@@ -50,6 +51,10 @@ export const TestPrompt: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [variablePrefix, setVariablePrefix] = useState('{{');
   const [variableSuffix, setVariableSuffix] = useState('}}');
+  const [providers, setProviders] = useState<LLMProvider[]>([]);
+  const [providerLoading, setProviderLoading] = useState(true);
+  const [providerError, setProviderError] = useState<string | null>(null);
+  const [selectedProviderId, setSelectedProviderId] = useState<string>('');
 
   // Escape regex special characters
   const escapeRegExp = (string: string) => {
@@ -137,6 +142,34 @@ export const TestPrompt: React.FC = () => {
     }
   };
 
+  const loadProviders = async () => {
+    setProviderLoading(true);
+    try {
+      const list = await apiService.getLLMProviders();
+      setProviders(list);
+      if (list.length === 0) {
+        setProviderError('尚未配置任何模型，请前往系统设置。');
+        setSelectedProviderId('');
+      } else {
+        const defaultProvider = list.find(provider => provider.is_default) || list[0];
+        setSelectedProviderId(defaultProvider?.id || '');
+        if (defaultProvider) {
+          setModelSettings(prev => ({ ...prev, model: defaultProvider.model }));
+        }
+        setProviderError(null);
+      }
+    } catch (err) {
+      console.error('Failed to load providers:', err);
+      setProviderError('加载可用模型失败，请检查系统设置。');
+    } finally {
+      setProviderLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadProviders();
+  }, []);
+
   const handleDragEnd = (result: any) => {
     if (!result.destination) return;
     
@@ -181,6 +214,11 @@ export const TestPrompt: React.FC = () => {
         return;
     }
 
+    if (!providerLoading && providers.length === 0) {
+      alert('请先在系统设置中配置至少一个模型供应商');
+      return;
+    }
+
     setLoading(true);
     setResponse('');
     
@@ -204,6 +242,14 @@ export const TestPrompt: React.FC = () => {
     });
     
     // Prepare request options (passing model settings if supported by API service wrapper)
+    const llmOptions = {
+      providerId: selectedProviderId || undefined,
+      model: modelSettings.model,
+      temperature: modelSettings.temperature,
+      topP: modelSettings.topP,
+      maxTokens: modelSettings.maxTokens,
+    };
+
     const abort = apiService.testPromptStream(
       apiMessages,
       (text) => {
@@ -219,10 +265,18 @@ export const TestPrompt: React.FC = () => {
           setLoading(false);
           setStreamAbort(null);
       },
-      modelSettings // Passing settings
+      llmOptions
     );
     
     setStreamAbort(() => abort);
+  };
+
+  const handleProviderChange = (providerId: string) => {
+    setSelectedProviderId(providerId);
+    const provider = providers.find(item => item.id === providerId);
+    if (provider) {
+      setModelSettings(prev => ({ ...prev, model: provider.model }));
+    }
   };
 
   return (
@@ -240,7 +294,30 @@ export const TestPrompt: React.FC = () => {
               <h1 className="text-xl font-bold text-gray-900">提示词测试</h1>
             </div>
             
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-4">
+              <div className="flex flex-col">
+                <span className="text-xs text-gray-500 mb-1">调用模型</span>
+                {providerLoading ? (
+                  <span className="text-sm text-gray-400">加载中...</span>
+                ) : (
+                  <select
+                    value={selectedProviderId}
+                    onChange={(e) => handleProviderChange(e.target.value)}
+                    disabled={providers.length === 0}
+                    className="text-sm border border-gray-200 rounded-md px-3 py-1.5 focus:ring-indigo-500 focus:border-indigo-500 min-w-[200px] bg-white disabled:text-gray-400"
+                  >
+                    {providers.length === 0 ? (
+                      <option value="">无可用模型</option>
+                    ) : (
+                      providers.map((provider) => (
+                        <option key={provider.id} value={provider.id}>
+                          {provider.name || provider.model}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                )}
+              </div>
               {/* Model Settings Button */}
               <div className="relative">
                 <button
@@ -420,6 +497,11 @@ export const TestPrompt: React.FC = () => {
               </button>
             </div>
           </div>
+          {providerError && (
+            <div className="mt-3 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-2">
+              {providerError}
+            </div>
+          )}
         </div>
       </div>
 

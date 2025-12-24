@@ -1,4 +1,4 @@
-import { Project, Prompt, Tag, ApiResponse, DiffResult } from '../types/models';
+import { Project, Prompt, Tag, ApiResponse, DiffResult, LLMProvider } from '../types/models';
 
 interface Env {
   API_URL: string;
@@ -12,7 +12,26 @@ declare global {
 
 const API_BASE_URL = (window.ENV?.API_URL || 'http://localhost:8080') + '/api';
 
+export interface LLMRequestOptions {
+  providerId?: string;
+  model?: string;
+  temperature?: number;
+  topP?: number;
+  maxTokens?: number;
+}
+
 class ApiService {
+  private buildLLMPayload(options?: LLMRequestOptions): Record<string, unknown> {
+    if (!options) return {};
+    const payload: Record<string, unknown> = {};
+    if (options.providerId) payload.provider_id = options.providerId;
+    if (options.model) payload.model = options.model;
+    if (typeof options.temperature === 'number') payload.temperature = options.temperature;
+    if (typeof options.topP === 'number') payload.top_p = options.topP;
+    if (typeof options.maxTokens === 'number') payload.max_tokens = options.maxTokens;
+    return payload;
+  }
+
   private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
     const response = await fetch(url, {
@@ -42,21 +61,83 @@ class ApiService {
     });
   }
 
-  async optimizePrompt(prompt: string): Promise<{ optimized_prompt: string }> {
+  private async buildLegacyProvidersFromSettings(): Promise<LLMProvider[]> {
+    const settings = await this.getSettings();
+    if (settings.llm_providers) {
+      try {
+        const parsed = JSON.parse(settings.llm_providers);
+        if (Array.isArray(parsed)) {
+          return parsed as LLMProvider[];
+        }
+      } catch (_err) {
+        console.warn('Failed to parse llm_providers from settings, falling back to Aliyun config');
+      }
+    }
+
+    const apiKey = settings.aliyun_api_key || '';
+    if (!apiKey) {
+      return [];
+    }
+    return [
+      {
+        id: settings.aliyun_provider_id || 'aliyun-default',
+        name: settings.aliyun_display_name || '阿里云默认模型',
+        provider: 'aliyun',
+        api_key: apiKey,
+        api_url: settings.aliyun_api_url || 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+        model: settings.aliyun_model || 'qwen-turbo',
+        system_prompt: settings.aliyun_system_prompt || '',
+        is_default: true,
+      },
+    ];
+  }
+
+  async getLLMProviders(): Promise<LLMProvider[]> {
+    const url = `${API_BASE_URL}/llm-providers`;
+    const response = await fetch(url, { headers: { 'Content-Type': 'application/json' } });
+    if (response.ok) {
+      return response.json();
+    }
+    if (response.status === 404) {
+      return this.buildLegacyProvidersFromSettings();
+    }
+    throw new Error(`API request failed: ${response.statusText}`);
+  }
+
+  async saveLLMProviders(providers: LLMProvider[]): Promise<void> {
+    const response = await fetch(`${API_BASE_URL}/llm-providers`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ providers }),
+    });
+    if (response.ok) {
+      return;
+    }
+    if (response.status === 404) {
+      return this.updateSettings({
+        llm_providers: JSON.stringify(providers),
+      });
+    }
+    throw new Error(`API request failed: ${response.statusText}`);
+  }
+
+  async optimizePrompt(prompt: string, options?: LLMRequestOptions): Promise<{ optimized_prompt: string }> {
     return this.request<{ optimized_prompt: string }>('/optimize-prompt', {
       method: 'POST',
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ prompt, ...this.buildLLMPayload(options) }),
     });
   }
 
-  async testPrompt(messages: { role: string; content: string }[], options?: { model?: string; temperature?: number; topP?: number; maxTokens?: number }): Promise<{ response: string }> {
+  async testPrompt(messages: { role: string; content: string }[], options?: LLMRequestOptions): Promise<{ response: string }> {
     return this.request<{ response: string }>('/test-prompt', {
       method: 'POST',
-      body: JSON.stringify({ messages, ...options }),
+      body: JSON.stringify({ messages, ...this.buildLLMPayload(options) }),
     });
   }
 
-  testPromptStream(messages: { role: string; content: string }[], onData: (text: string) => void, onError: (error: string) => void, onComplete?: () => void, options?: { model?: string; temperature?: number; topP?: number; maxTokens?: number }): () => void {
+  testPromptStream(messages: { role: string; content: string }[], onData: (text: string) => void, onError: (error: string) => void, onComplete?: () => void, options?: LLMRequestOptions): () => void {
     const controller = new AbortController();
     const signal = controller.signal;
 
@@ -65,7 +146,7 @@ class ApiService {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ messages, stream: true, ...options }),
+      body: JSON.stringify({ messages, stream: true, ...this.buildLLMPayload(options) }),
       signal,
     })
       .then(async (response) => {
@@ -129,7 +210,7 @@ class ApiService {
     return () => controller.abort();
   }
 
-  optimizePromptStream(prompt: string, onData: (text: string) => void, onError: (error: string) => void): () => void {
+  optimizePromptStream(prompt: string, onData: (text: string) => void, onError: (error: string) => void, onComplete?: () => void, options?: LLMRequestOptions): () => void {
     const controller = new AbortController();
     const signal = controller.signal;
 
@@ -138,7 +219,7 @@ class ApiService {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ prompt, stream: true }),
+      body: JSON.stringify({ prompt, stream: true, ...this.buildLLMPayload(options) }),
       signal,
     })
       .then(async (response) => {
@@ -202,6 +283,7 @@ class ApiService {
             }
           }
         }
+        if (onComplete) onComplete();
       })
       .catch((err) => {
         if (err.name === 'AbortError') {

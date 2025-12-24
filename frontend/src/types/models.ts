@@ -51,3 +51,14 @@ export interface ApiResponse<T> {
   total?: number;
   error?: string;
 }
+
+export interface LLMProvider {
+  id: string;
+  name: string;
+  provider: string;
+  api_key: string;
+  api_url?: string;
+  model: string;
+  system_prompt?: string;
+  is_default: boolean;
+}

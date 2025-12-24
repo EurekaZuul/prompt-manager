@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Tag as TagIcon, Code, Eye, Wand2 } from 'lucide-react';
-import { Tag } from '../types/models';
+import { Tag, LLMProvider } from '../types/models';
 import { apiService } from '../services/api';
 import ReactMarkdown from 'react-markdown';
 import clsx from 'clsx';
@@ -37,6 +37,9 @@ export const CreatePromptModal: React.FC<CreatePromptModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loadingTags, setLoadingTags] = useState(true);
   const [loadingCategories, setLoadingCategories] = useState(true);
+  const [loadingProviders, setLoadingProviders] = useState(true);
+  const [providers, setProviders] = useState<LLMProvider[]>([]);
+  const [selectedProviderId, setSelectedProviderId] = useState<string>('');
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [optimizationResult, setOptimizationResult] = useState<{
     original: string;
@@ -95,6 +98,7 @@ export const CreatePromptModal: React.FC<CreatePromptModalProps> = ({
     if (isOpen) {
       loadTags();
       loadCategories();
+      loadProviders();
     }
   }, [isOpen]);
 
@@ -119,6 +123,26 @@ export const CreatePromptModal: React.FC<CreatePromptModalProps> = ({
       console.error('Failed to load categories:', error);
     } finally {
       setLoadingCategories(false);
+    }
+  };
+
+  const loadProviders = async () => {
+    try {
+      setLoadingProviders(true);
+      const list = await apiService.getLLMProviders();
+      setProviders(list);
+      if (list.length > 0) {
+        const defaultProvider = list.find(provider => provider.is_default) || list[0];
+        setSelectedProviderId(defaultProvider?.id || '');
+      } else {
+        setSelectedProviderId('');
+      }
+    } catch (error) {
+      console.error('Failed to load providers:', error);
+      setProviders([]);
+      setSelectedProviderId('');
+    } finally {
+      setLoadingProviders(false);
     }
   };
 
@@ -155,6 +179,10 @@ export const CreatePromptModal: React.FC<CreatePromptModalProps> = ({
 
   const handleOptimize = async () => {
     if (!formData.content.trim()) return;
+    if (!loadingProviders && providers.length === 0) {
+      alert('请先在系统设置中配置模型供应商');
+      return;
+    }
     
     // 打开弹窗并重置状态
     setOptimizationResult({
@@ -176,24 +204,11 @@ export const CreatePromptModal: React.FC<CreatePromptModalProps> = ({
         console.error('Optimization failed:', error);
         alert('优化失败，请检查系统设置中的 API Key 配置');
         setIsOptimizing(false);
-      }
+      },
+      () => setIsOptimizing(false),
+      { providerId: selectedProviderId || undefined }
     );
-    // 注意：流式请求是异步的，这里不等待结束，而是通过回调更新
-    // 但我们需要知道何时结束来更新 loading 状态。
-    // apiService.optimizePromptStream 返回一个 abort 函数，但目前没有简单的 callback for done.
-    // 我们可以在 onData 中判断？不，SSE 持续接收。
-    // 简单起见，我们在 UI 上不依赖 isOptimizing 来关闭弹窗，而是让用户看到内容不再增加。
-    // 不过为了体验，我们可以让 isOptimizing 在流结束时变 false。
-    // 由于 optimizePromptStream 实现中使用了 await reader.read() loop，
-    // 我们可以在 apiService 中增加 onComplete 回调，或者修改 optimizePromptStream 返回 promise。
-    // 现在的实现是 fire-and-forget 风格（除了返回 abort）。
-    
-    // 让我们稍微修改一下逻辑：这里 setIsOptimizing(false) 可以在流开始后就设置，
-    // 或者我们让用户手动关闭。
-    // 实际上，OptimizedPromptDialog 并不显示 loading 状态，它是实时显示结果。
-    // 所以这里 setIsOptimizing(false) 可以在启动流之后立即执行，或者保留它用于按钮禁用状态。
-    // 既然弹窗已经打开，按钮禁用与否不重要了。
-    setIsOptimizing(false); 
+    // 状态会在流式完成或错误时更新
   };
 
   if (!isOpen) return null;
@@ -232,20 +247,40 @@ export const CreatePromptModal: React.FC<CreatePromptModalProps> = ({
             </label>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 border rounded-md p-4">
               <div>
-                <div className="mb-2 text-sm font-medium text-gray-500 flex items-center justify-between">
-                  <div className="flex items-center">
-                    <Code className="w-4 h-4 mr-1" /> 编辑源码
-                  </div>
+              <div className="mb-2 text-sm font-medium text-gray-500 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center">
+                  <Code className="w-4 h-4 mr-1" /> 编辑源码
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selectedProviderId}
+                    onChange={(e) => setSelectedProviderId(e.target.value)}
+                    disabled={loadingProviders || providers.length === 0}
+                    className="text-xs border border-gray-200 rounded-md px-2 py-1 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+                  >
+                    {loadingProviders ? (
+                      <option value="">加载模型...</option>
+                    ) : providers.length === 0 ? (
+                      <option value="">无可用模型</option>
+                    ) : (
+                      providers.map(provider => (
+                        <option key={provider.id} value={provider.id}>
+                          {provider.name || provider.model}
+                        </option>
+                      ))
+                    )}
+                  </select>
                   <button
                     type="button"
                     onClick={handleOptimize}
-                    disabled={isOptimizing || !formData.content.trim()}
+                    disabled={isOptimizing || !formData.content.trim() || providers.length === 0}
                     className="flex items-center text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 transition-colors disabled:opacity-50"
                   >
                     <Wand2 className="w-3 h-3 mr-1" />
                     {isOptimizing ? '优化中...' : 'AI 优化'}
                   </button>
                 </div>
+              </div>
                 <textarea
                   id="content"
                   value={formData.content}

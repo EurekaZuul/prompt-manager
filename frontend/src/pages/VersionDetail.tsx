@@ -12,7 +12,7 @@ import rehypeKatex from 'rehype-katex';
 import 'highlight.js/styles/github.css';
 import 'katex/dist/katex.min.css';
 import { apiService } from '../services/api';
-import { Prompt, Tag } from '../types/models';
+import { Prompt, Tag, LLMProvider } from '../types/models';
 import DiffViewer from '../components/DiffViewer';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { OptimizedPromptDialog } from '../components/OptimizedPromptDialog';
@@ -44,6 +44,9 @@ export const VersionDetail: React.FC = () => {
     optimized: '',
     isOpen: false,
   });
+  const [providers, setProviders] = useState<LLMProvider[]>([]);
+  const [loadingProviders, setLoadingProviders] = useState(true);
+  const [selectedProviderId, setSelectedProviderId] = useState<string>('');
 
   const markdownComponents = {
     h1: ({ node, ...props }: any) => (
@@ -115,6 +118,30 @@ export const VersionDetail: React.FC = () => {
       console.error('Failed to load tags:', error);
     }
   };
+
+  const loadProviders = async () => {
+    try {
+      setLoadingProviders(true);
+      const list = await apiService.getLLMProviders();
+      setProviders(list);
+      if (list.length > 0) {
+        const defaultProvider = list.find(provider => provider.is_default) || list[0];
+        setSelectedProviderId(defaultProvider?.id || '');
+      } else {
+        setSelectedProviderId('');
+      }
+    } catch (error) {
+      console.error('Failed to load providers:', error);
+      setProviders([]);
+      setSelectedProviderId('');
+    } finally {
+      setLoadingProviders(false);
+    }
+  };
+
+  useEffect(() => {
+    loadProviders();
+  }, []);
 
   const loadPrompt = async () => {
     try {
@@ -220,6 +247,10 @@ export const VersionDetail: React.FC = () => {
 
   const handleOptimize = async () => {
     if (!editContent.trim()) return;
+    if (!loadingProviders && providers.length === 0) {
+      alert('请先在系统设置中配置模型供应商');
+      return;
+    }
     
     setOptimizationResult({
       original: editContent,
@@ -240,9 +271,10 @@ export const VersionDetail: React.FC = () => {
         console.error('Optimization failed:', error);
         alert('优化失败，请检查系统设置中的 API Key 配置');
         setIsOptimizing(false);
-      }
+      },
+      () => setIsOptimizing(false),
+      { providerId: selectedProviderId || undefined }
     );
-    setIsOptimizing(false);
   };
 
   if (loading) {
@@ -648,19 +680,39 @@ export const VersionDetail: React.FC = () => {
                 </label>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 border border-gray-200 rounded-xl p-4 bg-gray-50/50">
                   <div className="flex flex-col h-[600px]">
-                    <div className="mb-2 text-xs font-bold text-gray-500 uppercase tracking-wider flex items-center justify-between">
+                    <div className="mb-2 text-xs font-bold text-gray-500 uppercase tracking-wider flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <div className="flex items-center">
                         <Code className="w-3 h-3 mr-1" /> 源码编辑
                       </div>
-                      <button
-                        type="button"
-                        onClick={handleOptimize}
-                        disabled={isOptimizing || !editContent.trim()}
-                        className="flex items-center text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 transition-colors disabled:opacity-50"
-                      >
-                        <Wand2 className="w-3 h-3 mr-1" />
-                        {isOptimizing ? '优化中...' : 'AI 优化'}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={selectedProviderId}
+                          onChange={(e) => setSelectedProviderId(e.target.value)}
+                          disabled={loadingProviders || providers.length === 0}
+                          className="text-[11px] border border-gray-200 rounded-md px-2 py-1 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+                        >
+                          {loadingProviders ? (
+                            <option value="">加载模型...</option>
+                          ) : providers.length === 0 ? (
+                            <option value="">无可用模型</option>
+                          ) : (
+                            providers.map(provider => (
+                              <option key={provider.id} value={provider.id}>
+                                {provider.name || provider.model}
+                              </option>
+                            ))
+                          )}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={handleOptimize}
+                          disabled={isOptimizing || !editContent.trim() || providers.length === 0}
+                          className="flex items-center text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 transition-colors disabled:opacity-50"
+                        >
+                          <Wand2 className="w-3 h-3 mr-1" />
+                          {isOptimizing ? '优化中...' : 'AI 优化'}
+                        </button>
+                      </div>
                     </div>
                     <textarea
                       rows={20}

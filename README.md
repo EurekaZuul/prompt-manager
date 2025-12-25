@@ -127,9 +127,10 @@ npm run dev
    By default the build artifacts live in `frontend/dist`. Copy this directory onto the production server (for example `/opt/prompt-manager/frontend-dist`).
 
 2. **Let FastAPI host the bundle (default)**
-   - The backend automatically looks for `frontend/dist` relative to the repo. Once that directory exists, it is mounted at `/`, while `/api` keeps handling JSON/SSE.
-   - If you store the built assets elsewhere, override `FRONTEND_DIST_PATH` with the absolute path.
-   - Prefer a CDN or standalone static host? Leave `FRONTEND_DIST_PATH` empty and point your reverse proxy to the external bundle while proxying `/api` to FastAPI.
+- The backend automatically looks for `frontend/dist` relative to the repo. Once that directory exists, it is mounted at `/`, while `/api` keeps handling JSON/SSE.
+- If you store the built assets elsewhere, override `FRONTEND_DIST_PATH` with the absolute path.
+- The static mount ships with an SPA fallback, so refreshing `/project/<id>` or other client routes always serves `index.html`.
+- Prefer a CDN or standalone static host? Leave `FRONTEND_DIST_PATH` empty and point your reverse proxy to the external bundle while proxying `/api` to FastAPI.
 
 3. **Configure CORS**
    - `CORS_ALLOW_ORIGINS` accepts a comma-separated list. Example: `CORS_ALLOW_ORIGINS=https://prompt.example.com,https://ops.example.com`.

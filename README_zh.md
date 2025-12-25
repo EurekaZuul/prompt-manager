@@ -125,9 +125,10 @@ npm run dev
    构建结果位于 `frontend/dist`，将其上传到生产服务器（如 `/opt/prompt-manager/frontend-dist`）。
 
 2. **默认由 FastAPI 托管静态资源**
-   - 在项目结构未变的情况下，只要存在 `frontend/dist`，后端就会自动将其挂载到 `/`，`/api` 仍用于 JSON/SSE。
-   - 如果构建产物存放在其他目录，可通过 `FRONTEND_DIST_PATH` 指向新的绝对路径。
-   - 若希望交由 CDN / 独立站点托管前端，只需把 `FRONTEND_DIST_PATH` 设为空（或删除该变量），由前端站点请求后端 `/api`。
+- 在项目结构未变的情况下，只要存在 `frontend/dist`，后端就会自动将其挂载到 `/`，`/api` 仍用于 JSON/SSE。
+- 如果构建产物存放在其他目录，可通过 `FRONTEND_DIST_PATH` 指向新的绝对路径。
+- 挂载静态资源时已内置 SPA fallback，刷新 `/project/<id>` 等前端路由会自动返回 `index.html`。
+- 若希望交由 CDN / 独立站点托管前端，只需把 `FRONTEND_DIST_PATH` 设为空（或删除该变量），由前端站点请求后端 `/api`。
 
 3. **配置 CORS**
    - `CORS_ALLOW_ORIGINS` 支持逗号分隔的多个域名，例如：`CORS_ALLOW_ORIGINS=https://prompt.example.com,https://ops.example.com`。

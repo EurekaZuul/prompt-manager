@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { ArrowLeft, Trash2, Play, GripVertical, StopCircle, Calculator, Copy, Settings, X, Check } from 'lucide-react';
+import { ArrowLeft, Trash2, Play, GripVertical, StopCircle, Calculator, Copy, Settings, X, Check, RefreshCw, History, Pen } from 'lucide-react';
 import { apiService } from '../services/api';
-import { LLMProvider } from '../types/models';
+import { LLMProvider, PromptTestHistory } from '../types/models';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
@@ -21,6 +21,41 @@ interface ModelSettings {
   topP: number;
   maxTokens: number;
 }
+
+const HISTORY_TITLE_LIMIT = 30;
+
+const buildHistoryTitle = (
+  messageList: { role: string; content?: string }[] | undefined,
+  fallbackLabel?: string,
+  createdAt?: string,
+) => {
+  if (messageList) {
+    for (const entry of messageList) {
+      if (entry.role === 'user') {
+        const text = (entry.content || '').trim();
+        if (text) {
+          return text.length > HISTORY_TITLE_LIMIT ? `${text.slice(0, HISTORY_TITLE_LIMIT)}...` : text;
+        }
+      }
+    }
+  }
+  const base = fallbackLabel || '测试记录';
+  const timestamp = createdAt ? new Date(createdAt).toLocaleString() : new Date().toLocaleString();
+  return `${base} · ${timestamp}`;
+};
+
+const buildHistoryPreview = (messageList: { role: string; content?: string }[] | undefined) => {
+  if (!messageList || messageList.length === 0) {
+    return '无内容';
+  }
+  const userMessage = messageList.find(msg => msg.role === 'user' && (msg.content || '').trim());
+  const source = userMessage || messageList[0];
+  const text = (source?.content || '').trim();
+  if (!text) {
+    return '无内容';
+  }
+  return text.length > 60 ? `${text.slice(0, 60)}...` : text;
+};
 
 export const TestPrompt: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -55,6 +90,18 @@ export const TestPrompt: React.FC = () => {
   const [providerLoading, setProviderLoading] = useState(true);
   const [providerError, setProviderError] = useState<string | null>(null);
   const [selectedProviderId, setSelectedProviderId] = useState<string>('');
+  const [histories, setHistories] = useState<PromptTestHistory[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
+  const [editingHistoryId, setEditingHistoryId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
+  const [historyMutation, setHistoryMutation] = useState<{ id: string; type: 'rename' | 'delete' } | null>(null);
+  const responseRef = useRef('');
+  const getHistoryTitle = (history: PromptTestHistory) =>
+    (history.title && history.title.trim()) ||
+    buildHistoryTitle(history.messages, history.provider_name || history.model, history.created_at);
+  const getHistoryPreview = (history: PromptTestHistory) => buildHistoryPreview(history.messages);
 
   // Escape regex special characters
   const escapeRegExp = (string: string) => {
@@ -94,6 +141,10 @@ export const TestPrompt: React.FC = () => {
     calculateTokens();
   }, [messages, response, inputPrice, outputPrice]);
 
+  useEffect(() => {
+    responseRef.current = response;
+  }, [response]);
+
   const calculateTokens = () => {
     try {
       let totalTokens = 0;
@@ -119,12 +170,6 @@ export const TestPrompt: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    if (id) {
-      loadPrompt(id);
-    }
-  }, [id]);
-
   const loadPrompt = async (promptId: string) => {
     try {
       const prompt = await apiService.getPrompt(promptId);
@@ -141,6 +186,27 @@ export const TestPrompt: React.FC = () => {
       console.error('Failed to load prompt:', error);
     }
   };
+
+  const loadTestHistories = async (promptId: string) => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const response = await apiService.getPromptTestHistories(promptId, { limit: 30 });
+      setHistories(response.data || []);
+    } catch (error) {
+      console.error('Failed to load test histories:', error);
+      setHistoryError('历史记录加载失败，请稍后重试');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (id) {
+      loadPrompt(id);
+      loadTestHistories(id);
+    }
+  }, [id]);
 
   const loadProviders = async () => {
     setProviderLoading(true);
@@ -169,6 +235,192 @@ export const TestPrompt: React.FC = () => {
   useEffect(() => {
     loadProviders();
   }, []);
+
+  const normalizeHistoryMessages = (historyMessages?: PromptTestHistory['messages']): Message[] => {
+    if (!historyMessages || historyMessages.length === 0) {
+      const now = Date.now();
+      return [
+        { id: `system-${now}`, role: 'system', content: '' },
+        { id: `user-${now + 1}`, role: 'user', content: '' },
+      ];
+    }
+    const timestamp = Date.now();
+    return historyMessages.map((msg, index) => {
+      const role: Message['role'] = msg.role === 'system' || msg.role === 'assistant' ? msg.role : 'user';
+      return {
+        id: msg.id || `${role}-${timestamp + index}`,
+        role,
+        content: msg.content || '',
+      };
+    });
+  };
+
+  const handleHistorySelect = (history: PromptTestHistory) => {
+    setEditingHistoryId(null);
+    setEditingTitle('');
+    setSelectedHistoryId(history.id);
+    const normalizedMessages = normalizeHistoryMessages(history.messages);
+    setMessages(normalizedMessages);
+    setVariableValues(history.variable_values || {});
+    setVariablePrefix(history.variable_prefix ?? variablePrefix);
+    setVariableSuffix(history.variable_suffix ?? variableSuffix);
+    if (typeof history.input_price === 'number') {
+      setInputPrice(history.input_price);
+    }
+    if (typeof history.output_price === 'number') {
+      setOutputPrice(history.output_price);
+    }
+    setSelectedProviderId(history.provider_id ?? selectedProviderId);
+    setModelSettings(prev => ({
+      ...prev,
+      model: history.model || prev.model,
+      temperature: typeof history.temperature === 'number' ? history.temperature : prev.temperature,
+      topP: typeof history.top_p === 'number' ? history.top_p : prev.topP,
+      maxTokens: typeof history.max_tokens === 'number' ? history.max_tokens : prev.maxTokens,
+    }));
+    const restoredResponse = history.response || '';
+    setResponse(restoredResponse);
+    responseRef.current = restoredResponse;
+  };
+
+  const handleHistoryRefresh = () => {
+    if (id) {
+      loadTestHistories(id);
+      setEditingHistoryId(null);
+      setEditingTitle('');
+    }
+  };
+
+  const handleStartNewTest = () => {
+    setSelectedHistoryId(null);
+    setResponse('');
+    responseRef.current = '';
+    setEditingHistoryId(null);
+    setEditingTitle('');
+  };
+
+  const startHistoryTitleEdit = (history: PromptTestHistory) => {
+    setEditingHistoryId(history.id);
+    setEditingTitle(history.title || '');
+  };
+
+  const cancelHistoryTitleEdit = () => {
+    setEditingHistoryId(null);
+    setEditingTitle('');
+  };
+
+  const handleHistoryTitleSave = async () => {
+    if (!editingHistoryId) return;
+    const titlePayload = editingTitle.trim();
+    try {
+      setHistoryMutation({ id: editingHistoryId, type: 'rename' });
+      const updated = await apiService.updatePromptTestHistory(editingHistoryId, { title: titlePayload });
+      setHistories(prev => prev.map(item => (item.id === updated.id ? updated : item)));
+    } catch (error) {
+      console.error('Failed to rename history:', error);
+      alert('重命名失败，请稍后再试。');
+    } finally {
+      setHistoryMutation(null);
+      cancelHistoryTitleEdit();
+    }
+  };
+
+  const handleHistoryTitleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      void handleHistoryTitleSave();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      cancelHistoryTitleEdit();
+    }
+  };
+
+  const handleHistoryDelete = async (history: PromptTestHistory) => {
+    const confirmed = window.confirm('确定要删除这条测试历史吗？此操作无法撤销。');
+    if (!confirmed) return;
+
+    try {
+      setHistoryMutation({ id: history.id, type: 'delete' });
+      await apiService.deletePromptTestHistory(history.id);
+      setHistories(prev => prev.filter(item => item.id !== history.id));
+      if (selectedHistoryId === history.id) {
+        setSelectedHistoryId(null);
+        setResponse('');
+        responseRef.current = '';
+      }
+    } catch (error) {
+      console.error('Failed to delete history:', error);
+      alert('删除失败，请稍后再试。');
+    } finally {
+      setHistoryMutation(null);
+    }
+  };
+
+  const persistHistory = async (
+    messagesSnapshot: Message[],
+    finalResponse: string,
+    metadata: {
+      variableValues: Record<string, string>;
+      providerId?: string;
+      providerName?: string;
+      modelSettings: ModelSettings;
+      variablePrefix: string;
+      variableSuffix: string;
+      inputPrice: number;
+      outputPrice: number;
+    }
+  ) => {
+    if (!id || !finalResponse.trim()) {
+      return;
+    }
+
+    try {
+      let inputTokens = 0;
+      messagesSnapshot.forEach(msg => {
+        const tokens = encode(msg.content || '');
+        inputTokens += tokens.length;
+      });
+      const outputTokens = encode(finalResponse || '').length;
+      const totalTokens = inputTokens + outputTokens;
+      const estimatedCost = (inputTokens / 1000 * metadata.inputPrice) + (outputTokens / 1000 * metadata.outputPrice);
+      const generatedTitle = buildHistoryTitle(
+        messagesSnapshot,
+        metadata.providerName || metadata.modelSettings.model,
+      );
+
+      const payload = {
+        messages: messagesSnapshot.map(msg => ({
+          id: msg.id,
+          role: msg.role,
+          content: msg.content,
+        })),
+        response: finalResponse,
+        title: generatedTitle,
+        provider_id: metadata.providerId,
+        provider_name: metadata.providerName,
+        model: metadata.modelSettings.model,
+        temperature: metadata.modelSettings.temperature,
+        top_p: metadata.modelSettings.topP,
+        max_tokens: metadata.modelSettings.maxTokens,
+        variable_values: Object.keys(metadata.variableValues || {}).length ? metadata.variableValues : undefined,
+        variable_prefix: metadata.variablePrefix,
+        variable_suffix: metadata.variableSuffix,
+        token_count: totalTokens,
+        cost: Number.isFinite(estimatedCost) ? estimatedCost : undefined,
+        input_price: metadata.inputPrice,
+        output_price: metadata.outputPrice,
+      };
+      const saved = await apiService.savePromptTestHistory(id, payload);
+      setHistories(prev => {
+        const filtered = prev.filter(item => item.id !== saved.id);
+        return [saved, ...filtered].slice(0, 30);
+      });
+      setSelectedHistoryId(saved.id);
+      setHistoryError(null);
+    } catch (error) {
+      console.error('Failed to save test history:', error);
+    }
+  };
 
   const handleDragEnd = (result: any) => {
     if (!result.destination) return;
@@ -219,11 +471,32 @@ export const TestPrompt: React.FC = () => {
       return;
     }
 
+    const timestamp = Date.now();
+    const messageSnapshot = messages.map((msg, index) => ({
+      ...msg,
+      id: msg.id || `${msg.role}-${timestamp + index}`,
+    }));
+    const variableValuesSnapshot = { ...variableValues };
+    const modelSettingsSnapshot = { ...modelSettings };
+    const selectedProvider = providers.find(item => item.id === selectedProviderId);
+    const metadata = {
+      variableValues: variableValuesSnapshot,
+      providerId: selectedProviderId || undefined,
+      providerName: selectedProvider?.name || selectedProvider?.model,
+      modelSettings: modelSettingsSnapshot,
+      variablePrefix,
+      variableSuffix,
+      inputPrice,
+      outputPrice,
+    };
+
     setLoading(true);
     setResponse('');
+    responseRef.current = '';
+    setSelectedHistoryId(null);
     
     // Replace variables
-    const apiMessages = messages.map(({ role, content }) => {
+    const apiMessages = messageSnapshot.map(({ role, content }) => {
       let newContent = content;
       if (variablePrefix && variableSuffix) {
           const escapedPrefix = escapeRegExp(variablePrefix);
@@ -253,7 +526,11 @@ export const TestPrompt: React.FC = () => {
     const abort = apiService.testPromptStream(
       apiMessages,
       (text) => {
-        setResponse(prev => prev + text);
+        setResponse(prev => {
+          const next = prev + text;
+          responseRef.current = next;
+          return next;
+        });
       },
       (error) => {
         console.error('Stream error:', error);
@@ -264,6 +541,7 @@ export const TestPrompt: React.FC = () => {
       () => {
           setLoading(false);
           setStreamAbort(null);
+          void persistHistory(messageSnapshot, responseRef.current, metadata);
       },
       llmOptions
     );
@@ -280,10 +558,10 @@ export const TestPrompt: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      <div className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
+    <main className="min-h-screen bg-gray-50 flex flex-col">
+      <header className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-10">
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <section className="flex items-center justify-between">
             <div className="flex items-center">
               <button
                 onClick={() => navigate(-1)}
@@ -293,8 +571,8 @@ export const TestPrompt: React.FC = () => {
               </button>
               <h1 className="text-xl font-bold text-gray-900">提示词测试</h1>
             </div>
-            
-            <div className="flex items-center space-x-4">
+
+            <section className="flex items-center space-x-4">
               <div className="flex flex-col">
                 <span className="text-xs text-gray-500 mb-1">调用模型</span>
                 {providerLoading ? (
@@ -318,106 +596,106 @@ export const TestPrompt: React.FC = () => {
                   </select>
                 )}
               </div>
-              {/* Model Settings Button */}
-              <div className="relative">
+
+              <section className="relative">
                 <button
-                    onClick={() => setShowModelSettings(!showModelSettings)}
-                    className={`p-2 rounded-lg border transition-colors ${
-                        showModelSettings 
-                            ? 'bg-indigo-50 border-indigo-200 text-indigo-600' 
-                            : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                    }`}
-                    title="模型设置"
+                  onClick={() => setShowModelSettings(!showModelSettings)}
+                  className={`p-2 rounded-lg border transition-colors ${
+                    showModelSettings
+                      ? 'bg-indigo-50 border-indigo-200 text-indigo-600'
+                      : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                  }`}
+                  title="模型设置"
                 >
-                    <Settings className="w-5 h-5" />
+                  <Settings className="w-5 h-5" />
                 </button>
                 {showModelSettings && (
-                    <div className="absolute top-full right-0 mt-2 p-4 bg-white rounded-xl shadow-xl border border-gray-100 w-72 z-20">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-sm font-bold text-gray-900">模型参数设置</h3>
-                            <button onClick={() => setShowModelSettings(false)} className="text-gray-400 hover:text-gray-600">
-                                <X className="w-4 h-4" />
-                            </button>
-                        </div>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-xs font-medium text-gray-700 mb-1">模型 (Model)</label>
-                                <input
-                                    type="text"
-                                    value={modelSettings.model}
-                                    onChange={(e) => setModelSettings({...modelSettings, model: e.target.value})}
-                                    className="w-full text-sm border-gray-200 rounded-md focus:ring-indigo-500 focus:border-indigo-500 mb-2"
-                                    placeholder="输入模型名称..."
-                                />
-                                <div className="flex flex-wrap gap-2">
-                                    {['qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-long'].map(m => (
-                                        <button
-                                            key={m}
-                                            onClick={() => setModelSettings({...modelSettings, model: m})}
-                                            className={`text-[10px] px-2 py-1 rounded border transition-colors ${
-                                                modelSettings.model === m 
-                                                ? 'bg-indigo-50 border-indigo-200 text-indigo-600 font-medium' 
-                                                : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'
-                                            }`}
-                                        >
-                                            {m}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                            <div>
-                                <div className="flex justify-between mb-1">
-                                    <label className="block text-xs font-medium text-gray-700">随机性 (Temperature)</label>
-                                    <span className="text-xs text-gray-500">{modelSettings.temperature}</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="2"
-                                    step="0.1"
-                                    value={modelSettings.temperature}
-                                    onChange={(e) => setModelSettings({...modelSettings, temperature: parseFloat(e.target.value)})}
-                                    className="w-full"
-                                />
-                            </div>
-                            <div>
-                                <div className="flex justify-between mb-1">
-                                    <label className="block text-xs font-medium text-gray-700">核采样 (Top P)</label>
-                                    <span className="text-xs text-gray-500">{modelSettings.topP}</span>
-                                </div>
-                                <input
-                                    type="range"
-                                    min="0"
-                                    max="1"
-                                    step="0.05"
-                                    value={modelSettings.topP}
-                                    onChange={(e) => setModelSettings({...modelSettings, topP: parseFloat(e.target.value)})}
-                                    className="w-full"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-medium text-gray-700 mb-1">最大Token数</label>
-                                <input
-                                    type="number"
-                                    value={modelSettings.maxTokens}
-                                    onChange={(e) => setModelSettings({...modelSettings, maxTokens: parseInt(e.target.value)})}
-                                    className="w-full text-sm border-gray-200 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
-                                />
-                            </div>
-                        </div>
+                  <div className="absolute top-full right-0 mt-2 p-4 bg-white rounded-xl shadow-xl border border-gray-100 w-72 z-20">
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-sm font-bold text-gray-900">模型参数设置</h3>
+                      <button onClick={() => setShowModelSettings(false)} className="text-gray-400 hover:text-gray-600">
+                        <X className="w-4 h-4" />
+                      </button>
                     </div>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">模型 (Model)</label>
+                        <input
+                          type="text"
+                          value={modelSettings.model}
+                          onChange={(e) => setModelSettings({ ...modelSettings, model: e.target.value })}
+                          className="w-full text-sm border-gray-200 rounded-md focus:ring-indigo-500 focus:border-indigo-500 mb-2"
+                          placeholder="输入模型名称..."
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          {['qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-long'].map((m) => (
+                            <button
+                              key={m}
+                              onClick={() => setModelSettings({ ...modelSettings, model: m })}
+                              className={`text-[10px] px-2 py-1 rounded border transition-colors ${
+                                modelSettings.model === m
+                                  ? 'bg-indigo-50 border-indigo-200 text-indigo-600 font-medium'
+                                  : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'
+                              }`}
+                            >
+                              {m}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex justify-between mb-1">
+                          <label className="block text-xs font-medium text-gray-700">随机性 (Temperature)</label>
+                          <span className="text-xs text-gray-500">{modelSettings.temperature}</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="2"
+                          step="0.1"
+                          value={modelSettings.temperature}
+                          onChange={(e) =>
+                            setModelSettings({ ...modelSettings, temperature: parseFloat(e.target.value) })
+                          }
+                          className="w-full"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex justify-between mb-1">
+                          <label className="block text-xs font-medium text-gray-700">核采样 (Top P)</label>
+                          <span className="text-xs text-gray-500">{modelSettings.topP}</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          value={modelSettings.topP}
+                          onChange={(e) =>
+                            setModelSettings({ ...modelSettings, topP: parseFloat(e.target.value) })
+                          }
+                          className="w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">最大Token数</label>
+                        <input
+                          type="number"
+                          value={modelSettings.maxTokens}
+                          onChange={(e) =>
+                            setModelSettings({ ...modelSettings, maxTokens: parseInt(e.target.value, 10) })
+                          }
+                          className="w-full text-sm border-gray-200 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 )}
-                {showModelSettings && (
-                    <div 
-                      className="fixed inset-0 z-10" 
-                      onClick={() => setShowModelSettings(false)}
-                    />
-                )}
-              </div>
+                {showModelSettings && <div className="fixed inset-0 z-10" onClick={() => setShowModelSettings(false)} />}
+              </section>
 
-              {/* Cost Settings */}
               <div className="relative">
-                <button 
+                <button
                   onClick={() => setShowCostSettings(!showCostSettings)}
                   className="flex flex-col items-end px-3 py-1 bg-gray-50 rounded-lg border border-gray-100 hover:bg-gray-100 transition-colors cursor-pointer"
                   title="点击设置模型单价"
@@ -426,11 +704,9 @@ export const TestPrompt: React.FC = () => {
                     <Calculator className="w-3 h-3" />
                     <span>Tokens: {tokenCount}</span>
                   </div>
-                  <div className="text-xs font-medium text-gray-700">
-                    ≈ ¥{cost.toFixed(5)}
-                  </div>
+                  <div className="text-xs font-medium text-gray-700">≈ ¥{cost.toFixed(5)}</div>
                 </button>
-                
+
                 {showCostSettings && (
                   <div className="absolute top-full right-0 mt-2 p-4 bg-white rounded-xl shadow-xl border border-gray-100 w-64 z-20">
                     <h3 className="text-sm font-bold text-gray-900 mb-3">模型价格设置 (每1k tokens)</h3>
@@ -462,24 +738,17 @@ export const TestPrompt: React.FC = () => {
                         </div>
                       </div>
                     </div>
-                    <div className="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-400 text-center">
-                      点击外部关闭设置
-                    </div>
+                    <div className="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-400 text-center">点击外部关闭设置</div>
                   </div>
                 )}
-                {showCostSettings && (
-                  <div 
-                    className="fixed inset-0 z-10" 
-                    onClick={() => setShowCostSettings(false)}
-                  />
-                )}
+                {showCostSettings && <div className="fixed inset-0 z-10" onClick={() => setShowCostSettings(false)} />}
               </div>
-              
+
               <button
                 onClick={handleTest}
                 className={`px-4 py-2 rounded-lg flex items-center font-medium transition-all ${
-                  loading 
-                    ? 'bg-red-50 text-red-600 hover:bg-red-100 border border-red-200' 
+                  loading
+                    ? 'bg-red-50 text-red-600 hover:bg-red-100 border border-red-200'
                     : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm hover:shadow-md'
                 }`}
               >
@@ -495,18 +764,181 @@ export const TestPrompt: React.FC = () => {
                   </>
                 )}
               </button>
-            </div>
-          </div>
+            </section>
+          </section>
           {providerError && (
             <div className="mt-3 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-2">
               {providerError}
             </div>
           )}
-        </div>
-      </div>
+        </section>
+      </header>
 
       <div className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 h-[calc(100vh-140px)]">
+        <div className="flex flex-col lg:flex-row gap-8">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 w-full lg:w-80 flex-shrink-0 flex flex-col lg:h-[calc(100vh-140px)]">
+            <div className="flex items-center justify-between p-4 border-b border-gray-100">
+              <div>
+                <div className="flex items-center text-gray-800 font-semibold">
+                  <History className="w-4 h-4 mr-2 text-indigo-500" />
+                  测试历史
+                </div>
+                <p className="text-xs text-gray-500 mt-1">自动保存最近的测试会话，点击即可回放</p>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={handleHistoryRefresh}
+                  className="p-2 rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50"
+                  title="刷新历史"
+                >
+                  <RefreshCw className={`w-4 h-4 ${historyLoading ? 'animate-spin' : ''}`} />
+                </button>
+                <button
+                  onClick={handleStartNewTest}
+                  className="px-3 py-1.5 text-sm rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50"
+                >
+                  新测试
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {historyLoading ? (
+                <div className="flex items-center justify-center p-6 text-sm text-gray-500">
+                  加载历史记录...
+                </div>
+              ) : histories.length === 0 ? (
+                <div className="p-6 text-sm text-gray-400 text-center">
+                  暂无测试历史，完成一次测试后会自动保存。
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {histories.map(history => {
+                    const title = getHistoryTitle(history);
+                    const preview = getHistoryPreview(history);
+                    const isSelected = selectedHistoryId === history.id;
+                    const isEditing = editingHistoryId === history.id;
+                    const mutation = historyMutation?.id === history.id ? historyMutation : null;
+                    const isRenaming = mutation?.type === 'rename';
+                    const isDeleting = mutation?.type === 'delete';
+                    return (
+                      <div
+                        key={history.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => handleHistorySelect(history)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            handleHistorySelect(history);
+                          }
+                        }}
+                        className={`group px-4 py-3 transition-colors cursor-pointer ${
+                          isSelected ? 'bg-indigo-50 border-l-4 border-indigo-400' : 'hover:bg-gray-50'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          {isEditing ? (
+                            <div
+                              className="flex items-center w-full space-x-2"
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              <input
+                                value={editingTitle}
+                                onChange={(event) => setEditingTitle(event.target.value)}
+                                onKeyDown={handleHistoryTitleKeyDown}
+                                className="flex-1 text-sm border-gray-200 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
+                                placeholder="输入标题"
+                                autoFocus
+                              />
+                              <button
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void handleHistoryTitleSave();
+                                }}
+                                className="p-1.5 rounded-md bg-green-50 text-green-600 hover:bg-green-100"
+                              >
+                                <Check className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  cancelHistoryTitleEdit();
+                                }}
+                                className="p-1.5 rounded-md bg-gray-50 text-gray-500 hover:bg-gray-100"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex-1">
+                              <div className="font-medium text-sm text-gray-900 line-clamp-2">{title}</div>
+                              <div className="text-[11px] text-gray-500 mt-1">
+                                {(history.provider_name || '默认模型')} · {(history.model || '未指定模型')}
+                              </div>
+                              <div className="text-[11px] text-gray-400">
+                                {new Date(history.created_at).toLocaleString()}
+                              </div>
+                            </div>
+                          )}
+                          {!isEditing && (
+                            <div className="flex flex-col items-end space-y-1">
+                              <button
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  startHistoryTitleEdit(history);
+                                }}
+                                className="p-1 rounded-md text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"
+                                title="重命名"
+                                disabled={isDeleting}
+                              >
+                                <Pen className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void handleHistoryDelete(history);
+                                }}
+                                className="p-1 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 disabled:opacity-50"
+                                title="删除记录"
+                                disabled={isRenaming || isDeleting}
+                              >
+                                {isDeleting ? (
+                                  <RefreshCw className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Trash2 className="w-4 h-4" />
+                                )}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        {!isEditing && (
+                          <>
+                            <div className="text-xs text-gray-500 mt-2 line-clamp-2">
+                              {preview}
+                            </div>
+                            <div className="flex items-center text-[11px] text-gray-400 mt-2 space-x-4">
+                              <span>消息 {history.messages?.length || 0}</span>
+                              {typeof history.token_count === 'number' && (
+                                <span>Tokens {history.token_count}</span>
+                              )}
+                              {typeof history.cost === 'number' && (
+                                <span>≈ ¥{history.cost.toFixed(4)}</span>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            {historyError && (
+              <div className="px-4 py-2 text-xs text-red-600 bg-red-50 border-t border-red-100">
+                {historyError}
+              </div>
+            )}
+          </div>
+          <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-8 h-[calc(100vh-140px)]">
           {/* Left Column: Chat Config */}
           <div className="flex flex-col h-full bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="p-4 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center">
@@ -698,5 +1130,6 @@ export const TestPrompt: React.FC = () => {
         </div>
       </div>
     </div>
-  );
+  </main>
+);
 };

@@ -1,4 +1,4 @@
-import { Project, Prompt, Tag, ApiResponse, DiffResult, LLMProvider } from '../types/models';
+import { Project, Prompt, Tag, ApiResponse, DiffResult, LLMProvider, PromptTestHistory } from '../types/models';
 
 interface Env {
   API_URL: string;
@@ -19,6 +19,25 @@ export interface LLMRequestOptions {
   temperature?: number;
   topP?: number;
   maxTokens?: number;
+}
+
+export interface PromptTestHistoryPayload {
+  messages: { id?: string; role: string; content: string }[];
+  response: string;
+  title?: string;
+  provider_id?: string;
+  provider_name?: string;
+  model?: string;
+  temperature?: number;
+  top_p?: number;
+  max_tokens?: number;
+  variable_values?: Record<string, string>;
+  variable_prefix?: string;
+  variable_suffix?: string;
+  token_count?: number;
+  cost?: number;
+  input_price?: number;
+  output_price?: number;
 }
 
 class ApiService {
@@ -209,6 +228,36 @@ class ApiService {
       });
 
     return () => controller.abort();
+  }
+
+  async getPromptTestHistories(promptId: string, params?: { limit?: number }): Promise<ApiResponse<PromptTestHistory[]>> {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) {
+      searchParams.set('limit', params.limit.toString());
+    }
+    const query = searchParams.toString();
+    const suffix = query ? `?${query}` : '';
+    return this.request<ApiResponse<PromptTestHistory[]>>(`/prompts/${promptId}/test-histories${suffix}`);
+  }
+
+  async savePromptTestHistory(promptId: string, payload: PromptTestHistoryPayload): Promise<PromptTestHistory> {
+    return this.request<PromptTestHistory>(`/prompts/${promptId}/test-histories`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updatePromptTestHistory(historyId: string, payload: { title?: string }): Promise<PromptTestHistory> {
+    return this.request<PromptTestHistory>(`/test-histories/${historyId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deletePromptTestHistory(historyId: string): Promise<void> {
+    await this.request(`/test-histories/${historyId}`, {
+      method: 'DELETE',
+    });
   }
 
   optimizePromptStream(prompt: string, onData: (text: string) => void, onError: (error: string) => void, onComplete?: () => void, options?: LLMRequestOptions): () => void {

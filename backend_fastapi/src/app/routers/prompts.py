@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from app.dependencies import get_db
-from app.schemas.models import DiffResult, Prompt
+from app.schemas.models import DiffResult, Prompt, PromptTestHistory
 from app.services import aliyun_service, provider_service
 from app.services.diff_service import DiffService
 from app.services.version_service import VersionService
@@ -46,6 +46,29 @@ class TestPromptRequest(BaseModel):
     temperature: Optional[float] = None
     top_p: Optional[float] = None
     max_tokens: Optional[int] = None
+
+
+class PromptTestHistoryCreateRequest(BaseModel):
+    messages: List[Dict[str, str]]
+    response: Optional[str] = None
+    title: Optional[str] = None
+    provider_id: Optional[str] = None
+    provider_name: Optional[str] = None
+    model: Optional[str] = None
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
+    max_tokens: Optional[int] = None
+    variable_values: Dict[str, str] | None = None
+    variable_prefix: Optional[str] = None
+    variable_suffix: Optional[str] = None
+    token_count: Optional[int] = None
+    cost: Optional[float] = None
+    input_price: Optional[float] = None
+    output_price: Optional[float] = None
+
+
+class PromptTestHistoryUpdateRequest(BaseModel):
+    title: Optional[str] = None
 
 
 @router.get("/projects/{project_id}/prompts")
@@ -321,6 +344,116 @@ async def test_prompt(payload: TestPromptRequest, db: AsyncIOMotorDatabase = Dep
     return {"response": response}
 
 
+@router.get("/prompts/{prompt_id}/test-histories")
+async def list_prompt_test_histories(
+    prompt_id: str,
+    limit: int = Query(default=20, ge=1, le=100),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+) -> Dict[str, Any]:
+    cursor = (
+        db.prompt_test_histories.find({"prompt_id": prompt_id})
+        .sort("created_at", -1)
+        .limit(limit)
+    )
+    histories: List[Dict[str, Any]] = []
+    async for doc in cursor:
+        history = _serialize_prompt_test_history(doc)
+        histories.append(history.model_dump())
+    return {"data": histories, "total": len(histories)}
+
+
+@router.post("/prompts/{prompt_id}/test-histories", status_code=201)
+async def create_prompt_test_history(
+    prompt_id: str,
+    payload: PromptTestHistoryCreateRequest,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+) -> Dict[str, Any]:
+    prompt = await db.prompts.find_one({"_id": prompt_id})
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+
+    doc = {
+        "_id": generate_id(),
+        "prompt_id": prompt_id,
+        "project_id": prompt["project_id"],
+        "title": (payload.title or "").strip()
+        or _derive_history_title(payload.messages, payload.provider_name, payload.model),
+        "messages": payload.messages,
+        "response": payload.response or "",
+        "provider_id": payload.provider_id,
+        "provider_name": payload.provider_name,
+        "model": payload.model,
+        "temperature": payload.temperature,
+        "top_p": payload.top_p,
+        "max_tokens": payload.max_tokens,
+        "variable_values": payload.variable_values or {},
+        "variable_prefix": payload.variable_prefix,
+        "variable_suffix": payload.variable_suffix,
+        "token_count": payload.token_count,
+        "cost": payload.cost,
+        "input_price": payload.input_price,
+        "output_price": payload.output_price,
+        "created_at": datetime.now(timezone.utc),
+    }
+    await db.prompt_test_histories.insert_one(doc)
+    history = _serialize_prompt_test_history(doc)
+    return history.model_dump()
+
+
+@router.get("/test-histories/{history_id}")
+async def get_prompt_test_history(history_id: str, db: AsyncIOMotorDatabase = Depends(get_db)) -> Dict[str, Any]:
+    doc = await db.prompt_test_histories.find_one({"_id": history_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="History not found")
+    history = _serialize_prompt_test_history(doc)
+    return history.model_dump()
+
+
+@router.patch("/test-histories/{history_id}")
+async def update_prompt_test_history(
+    history_id: str,
+    payload: PromptTestHistoryUpdateRequest,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+) -> Dict[str, Any]:
+    doc = await db.prompt_test_histories.find_one({"_id": history_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="History not found")
+
+    update_fields: Dict[str, Any] = {}
+    if payload.title is not None:
+        sanitized = payload.title.strip()
+        update_fields["title"] = sanitized or _derive_history_title(
+            doc.get("messages", []),
+            doc.get("provider_name"),
+            doc.get("model"),
+        )
+
+    if update_fields:
+        await db.prompt_test_histories.update_one({"_id": history_id}, {"$set": update_fields})
+
+    updated = await db.prompt_test_histories.find_one({"_id": history_id})
+    history = _serialize_prompt_test_history(updated)
+    return history.model_dump()
+
+
+@router.delete("/test-histories/{history_id}")
+async def delete_prompt_test_history(history_id: str, db: AsyncIOMotorDatabase = Depends(get_db)) -> Dict[str, str]:
+    result = await db.prompt_test_histories.delete_one({"_id": history_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="History not found")
+    return {"message": "History deleted"}
+
+
+def _derive_history_title(messages: List[Dict[str, str]], provider_name: Optional[str], model: Optional[str]) -> str:
+    for message in messages:
+        content = (message.get("content") or "").strip()
+        if message.get("role") == "user" and content:
+            return content[:30] + ("..." if len(content) > 30 else "")
+    base = provider_name or model or "测试记录"
+    timestamp = datetime.now(timezone.utc).strftime("%m-%d %H:%M")
+    return f"{base} · {timestamp}"
+
+
 async def _serialize_prompt(
     doc: Dict[str, Any],
     db: AsyncIOMotorDatabase,
@@ -381,6 +514,31 @@ async def _serialize_prompt(
         tags=tags,
         history=history_data,
         project=project_data,
+    )
+
+
+def _serialize_prompt_test_history(doc: Dict[str, Any]) -> PromptTestHistory:
+    return PromptTestHistory(
+        id=doc["_id"],
+        prompt_id=doc["prompt_id"],
+        project_id=doc.get("project_id", ""),
+        title=doc.get("title"),
+        messages=doc.get("messages", []),
+        response=doc.get("response"),
+        provider_id=doc.get("provider_id"),
+        provider_name=doc.get("provider_name"),
+        model=doc.get("model"),
+        temperature=doc.get("temperature"),
+        top_p=doc.get("top_p"),
+        max_tokens=doc.get("max_tokens"),
+        variable_values=doc.get("variable_values"),
+        variable_prefix=doc.get("variable_prefix"),
+        variable_suffix=doc.get("variable_suffix"),
+        token_count=doc.get("token_count"),
+        cost=doc.get("cost"),
+        input_price=doc.get("input_price"),
+        output_price=doc.get("output_price"),
+        created_at=doc.get("created_at"),
     )
 
 

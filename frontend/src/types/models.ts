@@ -39,6 +39,35 @@ export interface PromptHistory {
   prompt?: Prompt;
 }
 
+export interface PromptTestHistoryMessage {
+  id?: string;
+  role: string;
+  content: string;
+}
+
+export interface PromptTestHistory {
+  id: string;
+  prompt_id: string;
+  project_id: string;
+  title?: string;
+  messages: PromptTestHistoryMessage[];
+  response?: string;
+  provider_id?: string;
+  provider_name?: string;
+  model?: string;
+  temperature?: number;
+  top_p?: number;
+  max_tokens?: number;
+  variable_values?: Record<string, string>;
+  variable_prefix?: string;
+  variable_suffix?: string;
+  token_count?: number;
+  cost?: number;
+  input_price?: number;
+  output_price?: number;
+  created_at: string;
+}
+
 export interface DiffResult {
   additions: number;
   deletions: number;

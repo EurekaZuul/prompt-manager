@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -41,6 +41,29 @@ class Prompt(BaseModel):
     tags: List[Tag] | None = None
     history: List[PromptHistory] | None = None
     project: Optional["Project"] = None
+
+
+class PromptTestHistory(BaseModel):
+    id: str
+    prompt_id: str
+    project_id: str
+    title: Optional[str] = None
+    messages: List[Dict[str, str]]
+    response: Optional[str] = None
+    provider_id: Optional[str] = None
+    provider_name: Optional[str] = None
+    model: Optional[str] = None
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
+    max_tokens: Optional[int] = None
+    variable_values: Dict[str, str] | None = None
+    variable_prefix: Optional[str] = None
+    variable_suffix: Optional[str] = None
+    token_count: Optional[int] = None
+    cost: Optional[float] = None
+    input_price: Optional[float] = None
+    output_price: Optional[float] = None
+    created_at: datetime
 
 
 class ProjectPromptSummary(BaseModel):
